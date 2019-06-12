@@ -9,9 +9,13 @@
 import UIKit
 import Parse
 import Bolts
+import DateToolsSwift
 
 class HealthStreamViewController: PFQueryTableViewController, PFLogInViewControllerDelegate, PFSignUpViewControllerDelegate
 {
+    let postCellIdentifier:String = "Postcell"
+    let postCell_NoImageIdentifier:String = "PostCell_NoImage"
+    let userCellIdentifier:String = "UserCell"
     var user:PFUser?
 
     override init(style: UITableView.Style, className: String!)
@@ -54,6 +58,9 @@ class HealthStreamViewController: PFQueryTableViewController, PFLogInViewControl
     {
         super.viewDidLoad()
 
+        tableView.register(UINib(nibName: "PostTableViewCell", bundle: nil), forCellReuseIdentifier: postCellIdentifier)
+        tableView.register(UINib(nibName: "PostTableViewCell_NoImage", bundle: nil), forCellReuseIdentifier: postCell_NoImageIdentifier)
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: userCellIdentifier)
 
     }
     
@@ -181,15 +188,59 @@ class HealthStreamViewController: PFQueryTableViewController, PFLogInViewControl
 
     // MARK: - Table view data source
 
-    override func numberOfSections(in tableView: UITableView) -> Int
+    override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath, object: PFObject?) -> PFTableViewCell?
     {
-        // #warning Incomplete implementation, return the number of sections
-        return 0
-    }
-
-    override func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int
-    {
-        // #warning Incomplete implementation, return the number of rows
-        return 0
+        var cell:PostTableViewCell?
+        var identifier:String = postCellIdentifier
+        var nibName:String = "PostTableViewCell"
+        
+        if object?["image"] == nil
+        {
+            identifier = postCell_NoImageIdentifier
+            nibName = "PostTableViewCell_NoImage"
+        }
+        
+        cell = tableView.dequeueReusableCell(withIdentifier: identifier) as? PostTableViewCell
+        
+        if cell == nil
+        {
+            cell = Bundle.main.loadNibNamed(nibName, owner: self, options: nil)? [0] as? PostTableViewCell
+        }
+        
+        if let user:PFUser = object?["user"] as? PFUser
+        {
+            cell!.userNameLabel?.text = user["username"] as? String
+        }
+        if let file:PFFileObject = user?["avatar"] as? PFFileObject
+        {
+            file.getDataInBackground() {
+                (data, error) in
+                if data != nil
+                {
+                    cell!.userImageView?.image = UIImage(data: data!)
+                }
+            }
+        }
+        
+        cell!.postTextLabel?.text = object?["text"] as? String
+        
+        if let createdAt = object?.createdAt
+        {
+            cell!.postDateLabel?.text = createdAt.shortTimeAgoSinceNow
+        }
+        
+        if let file:PFFileObject = object?["image"] as? PFFileObject
+        {
+            file.getDataInBackground() {
+                (data, error) in
+                
+                if data != nil
+                {
+                    cell!.postImageView?.image = UIImage(data: data!)
+                }
+            }
+        }
+        
+        return cell
     }
 }
