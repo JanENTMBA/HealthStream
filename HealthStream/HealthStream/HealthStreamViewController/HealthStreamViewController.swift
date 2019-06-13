@@ -64,6 +64,17 @@ class HealthStreamViewController: PFQueryTableViewController, PFLogInViewControl
 
     }
     
+    override func viewWillLayoutSubviews() {
+        if let user = self.user
+        {
+            print("pm")
+        }
+        else
+        {
+            self.navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(named: "NewPostIcon"), style: UIBarButtonItem.Style.plain, target: self, action: #selector(onNewPostButtonTapped(_:)))
+        }
+    }
+    
     override func viewDidAppear(_ animated: Bool)
     {
         if PFUser.current() == nil
@@ -85,6 +96,13 @@ class HealthStreamViewController: PFQueryTableViewController, PFLogInViewControl
         }
         
         self.loadObjects()
+    }
+    
+    @objc func onNewPostButtonTapped(sender:UIBarButtonItem)
+    {
+        let newPostVC:NewPostViewController = NewPostViewController(nibName: "NewPostViewController", bundle: nil)
+        
+        self.navigationController?.pushViewController(newPostVC, animated: true)
     }
     
     // mark: - Log in with Parse
@@ -170,7 +188,7 @@ class HealthStreamViewController: PFQueryTableViewController, PFLogInViewControl
         self.loadObjects()
     }
     
-    // MARK: - Parse quere
+    // MARK: - Parse query
     
     override func queryForTable() -> PFQuery<PFObject>
     {
