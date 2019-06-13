@@ -11,12 +11,14 @@ import Parse
 import Bolts
 import DateToolsSwift
 
-class HealthStreamViewController: PFQueryTableViewController, PFLogInViewControllerDelegate, PFSignUpViewControllerDelegate
+class HealthStreamViewController: PFQueryTableViewController, PFLogInViewControllerDelegate, PFSignUpViewControllerDelegate, UISearchResultsUpdating
 {
     let postCellIdentifier:String = "Postcell"
     let postCell_NoImageIdentifier:String = "PostCell_NoImage"
     let userCellIdentifier:String = "UserCell"
     var user:PFUser?
+    var searchController:UISearchController?
+    var isSearching:Bool = false
 
     override init(style: UITableView.Style, className: String!)
     {
@@ -64,14 +66,24 @@ class HealthStreamViewController: PFQueryTableViewController, PFLogInViewControl
 
     }
     
-    override func viewWillLayoutSubviews() {
+    override func viewWillAppear(_ animated: Bool)
+    {
+        
         if let user = self.user
         {
-            print("pm")
+            print("user: \(user)")
         }
         else
         {
-            self.navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(named: "NewPostIcon"), style: UIBarButtonItem.Style.plain, target: self, action: #selector(onNewPostButtonTapped(_:)))
+            self.navigationItem.rightBarButtonItem = UIBarButtonItem(image: UIImage(named: "NewPostIcon"), style: UIBarButtonItem.Style.plain, target: self, action: #selector(onNewPostButtonTapped(sender:)))
+            self.navigationItem.leftBarButtonItem = UIBarButtonItem(image: UIImage(named: "UserIcon"), style: UIBarButtonItem.Style.plain, target: self, action: #selector(onUserButtonTapped(_:)))
+            
+            searchController = UISearchController(searchResultsController: nil)
+            searchController?.searchResultsUpdater = self
+            searchController?.dimsBackgroundDuringPresentation = false
+            
+            tableView.tableHeaderView = searchController?.searchBar
+            searchController?.searchBar.sizeToFit() // Bug
         }
     }
     
@@ -103,6 +115,23 @@ class HealthStreamViewController: PFQueryTableViewController, PFLogInViewControl
         let newPostVC:NewPostViewController = NewPostViewController(nibName: "NewPostViewController", bundle: nil)
         
         self.navigationController?.pushViewController(newPostVC, animated: true)
+    }
+    
+    @objc func onUserButtonTapped(_ sender:UIBarButtonItem)
+    {
+        if let currentUser = PFUser.current()
+        {
+            let streamVC:HealthStreamViewController = HealthStreamViewController(style: UITableView.Style.plain, className: "Post", user: currentUser)
+            self.navigationController?.pushViewController(streamVC, animated: true)
+        }
+    }
+    
+    func updateSearchResults(for searchController: UISearchController)
+    {
+        self.isSearching = searchController.searchBar.text?.isEmpty == false
+        self.tableView.allowsSelection = isSearching
+        
+        self.loadObjects()
     }
     
     // mark: - Log in with Parse
@@ -192,9 +221,42 @@ class HealthStreamViewController: PFQueryTableViewController, PFLogInViewControl
     
     override func queryForTable() -> PFQuery<PFObject>
     {
+        if isSearching == true
+        {
+            let query:PFQuery = PFQuery(className: "_User")
+            query.order(byAscending: "username")
+            
+            if let text:String = searchController?.searchBar.text
+            {
+                query.whereKey("username", matchesRegex: text, modifiers: "i")
+            }
+            
+            if objects != nil &&  objects!.count == 0
+            {
+                query.cachePolicy = PFCachePolicy.cacheThenNetwork
+            }
+            
+            return query
+        }
+        
         let query:PFQuery = PFQuery(className: "Post")
         query.includeKey("user")
         query.order(byDescending: "createdAt")
+        
+        if let user = self.user
+        {
+            query.whereKey("user", equalTo: user)
+        }
+        else
+        {
+            if let currentUser = PFUser.current()
+            {
+                let followerQuery:PFQuery = PFQuery(className: "User_Follow")
+                followerQuery.whereKey("follower", equalTo: currentUser)
+                
+                query.whereKey("user", matchesKey: "user", in: followerQuery)
+            }
+        }
         
         if objects != nil && objects!.count == 0
         {
@@ -208,6 +270,21 @@ class HealthStreamViewController: PFQueryTableViewController, PFLogInViewControl
 
     override func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath, object: PFObject?) -> PFTableViewCell?
     {
+        
+        if isSearching == true
+        {
+            var cell:PFTableViewCell? = tableView.dequeueReusableCell(withIdentifier: userCellIdentifier, for: indexPath) as? PFTableViewCell
+            
+            if cell == nil
+            {
+                cell = PFTableViewCell(style: UITableViewCell.CellStyle.default, reuseIdentifier: userCellIdentifier)
+            }
+            
+            cell?.textLabel?.text = object?["username"] as? String
+            
+            return cell
+        }
+        
         var cell:PostTableViewCell?
         var identifier:String = postCellIdentifier
         var nibName:String = "PostTableViewCell"
@@ -222,20 +299,22 @@ class HealthStreamViewController: PFQueryTableViewController, PFLogInViewControl
         
         if cell == nil
         {
-            cell = Bundle.main.loadNibNamed(nibName, owner: self, options: nil)? [0] as? PostTableViewCell
+            cell = Bundle.main.loadNibNamed(nibName, owner: self, options: nil)?[0] as? PostTableViewCell
         }
         
         if let user:PFUser = object?["user"] as? PFUser
         {
             cell!.userNameLabel?.text = user["username"] as? String
-        }
-        if let file:PFFileObject = user?["avatar"] as? PFFileObject
-        {
-            file.getDataInBackground() {
-                (data, error) in
-                if data != nil
-                {
-                    cell!.userImageView?.image = UIImage(data: data!)
+            
+            if let file:PFFileObject = user["avatar"] as? PFFileObject
+            {
+                file.getDataInBackground() {
+                    (data, error) in
+                    
+                    if data != nil
+                    {
+                        cell!.userImageView?.image = UIImage(data: data!)
+                    }
                 }
             }
         }
@@ -260,5 +339,22 @@ class HealthStreamViewController: PFQueryTableViewController, PFLogInViewControl
         }
         
         return cell
+    }
+    
+    override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        if(isSearching == false)
+        {
+            return
+        }
+        
+        searchController?.isActive = false
+        
+        if let user = self.object(at: indexPath) as? PFUser
+        {
+            let streamVC:HealthStreamViewController = HealthStreamViewController(style: UITableView.Style.plain, className: "post", user: user)
+            
+            self.navigationController?.pushViewController(streamVC, animated: true
+            )
+        }
     }
 }
