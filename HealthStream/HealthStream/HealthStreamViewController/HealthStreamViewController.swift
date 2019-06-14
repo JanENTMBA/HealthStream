@@ -10,8 +10,9 @@ import UIKit
 import Parse
 import Bolts
 import DateToolsSwift
+import MBProgressHUD
 
-class HealthStreamViewController: PFQueryTableViewController, PFLogInViewControllerDelegate, PFSignUpViewControllerDelegate, UISearchResultsUpdating
+class HealthStreamViewController: PFQueryTableViewController, PFLogInViewControllerDelegate, PFSignUpViewControllerDelegate, UISearchResultsUpdating, UIImagePickerControllerDelegate, UINavigationControllerDelegate
 {
     let postCellIdentifier:String = "Postcell"
     let postCell_NoImageIdentifier:String = "PostCell_NoImage"
@@ -19,6 +20,7 @@ class HealthStreamViewController: PFQueryTableViewController, PFLogInViewControl
     var user:PFUser?
     var searchController:UISearchController?
     var isSearching:Bool = false
+    var userHeaderView:UserHeaderView?
 
     override init(style: UITableView.Style, className: String!)
     {
@@ -71,7 +73,61 @@ class HealthStreamViewController: PFQueryTableViewController, PFLogInViewControl
         
         if let user = self.user
         {
-            print("user: \(user)")
+            
+            self.title = user.username
+            
+            userHeaderView = UserHeaderView(frame: CGRect(x: 0 , y: 0, width: tableView.frame.size.width, height: 135))
+            userHeaderView?.userNameLabel?.text = user.username
+            
+            if let file:PFFileObject = user["avatar"] as? PFFileObject
+            {
+                file.getDataInBackground() {
+                    (data, error) in
+                    
+                    if(data != nil)
+                    {
+                        self.userHeaderView?.imageView?.image = UIImage(data: data!)
+                    }
+                }
+            }
+            
+            if user == PFUser.current()
+            {
+                userHeaderView!.followButton?.isHidden = true
+                
+                let tapRecognizer:UITapGestureRecognizer = UITapGestureRecognizer(target: self, action: #selector(onUserAvatarTapped(_:)))
+                userHeaderView?.imageView?.addGestureRecognizer(tapRecognizer)
+            }
+            else
+            {
+                userHeaderView?.followButton?.addTarget(self, action: #selector(onFollowButtonTapped(_:)), for: UIControl.Event.touchUpInside)
+            }
+            
+            DispatchQueue.global(qos: .background).async {
+                if PFUser.current() != nil
+                {
+                    var error:NSError?
+                    
+                    let postCount:Int = PFQuery(className: "Post").whereKey("user", equalTo: user).countObjects(&error)
+                    let followerCount:Int = PFQuery(className: "User_Follow").whereKey("follower", equalTo: PFUser.current()!).countObjects(&error)
+                    let isFollowing:Bool = PFQuery(className: "User_follow").whereKey("user", equalTo: user).whereKey("follower", equalTo: PFUser.current()!).countObjects(&error) > 0
+                    
+                    if error != nil
+                    {
+                        print("Error: \(error!)")
+                    }
+                    
+                    DispatchQueue.main.async {
+                        self.userHeaderView?.numberPostsLabel?.text = "Posts: \(postCount)"
+                        self.userHeaderView?.numberFollowersLabel?.text = "Followers: \(followerCount)"
+                        
+                        self.userHeaderView?.followButton?.setTitle(isFollowing ? "niet meer volgen" : "volgen", for :UIControl.State.normal)
+                    }
+                }
+            }
+            
+            tableView.tableHeaderView = userHeaderView
+            
         }
         else
         {
@@ -110,6 +166,8 @@ class HealthStreamViewController: PFQueryTableViewController, PFLogInViewControl
         self.loadObjects()
     }
     
+//     MARK - tapping on buttons
+    
     @objc func onNewPostButtonTapped(sender:UIBarButtonItem)
     {
         let newPostVC:NewPostViewController = NewPostViewController(nibName: "NewPostViewController", bundle: nil)
@@ -123,6 +181,130 @@ class HealthStreamViewController: PFQueryTableViewController, PFLogInViewControl
         {
             let streamVC:HealthStreamViewController = HealthStreamViewController(style: UITableView.Style.plain, className: "Post", user: currentUser)
             self.navigationController?.pushViewController(streamVC, animated: true)
+        }
+    }
+    
+    @objc func onUserAvatarTapped(_ sender: UITapGestureRecognizer)
+    {
+        let alertControlle = UIAlertController(title: nil, message: "Kies een andere profielfoto", preferredStyle: UIAlertController.Style.actionSheet)
+        
+        let cancelAction = UIAlertAction(title: "laat maar", style: UIAlertAction.Style.cancel) { (action) in
+//            do nothing
+        }
+        
+        alertControlle.addAction(cancelAction)
+        
+        if UIImagePickerController.isSourceTypeAvailable(UIImagePickerController.SourceType.photoLibrary)
+        {
+            let libraryAction = UIAlertAction(title: "Kies foto", style: UIAlertAction.Style.default) {
+                (action) in
+                let picker:UIImagePickerController = UIImagePickerController()
+                picker.delegate = self
+                picker.sourceType = UIImagePickerController.SourceType.photoLibrary
+                
+                self.present(picker, animated: true, completion: nil)
+            }
+            
+            alertControlle.addAction(libraryAction)
+        }
+        
+        if UIImagePickerController.isSourceTypeAvailable(UIImagePickerController.SourceType.camera)
+        {
+            let cameraAction = UIAlertAction(title: "maak foto", style: UIAlertAction.Style.default) {
+                (action) in
+                
+                let picker:UIImagePickerController = UIImagePickerController()
+                picker.delegate = self
+                picker.sourceType = UIImagePickerController.SourceType.camera
+                
+                self.present(picker, animated: true, completion: nil)
+            }
+            
+            alertControlle.addAction(cameraAction)
+        }
+    }
+    
+    @objc func onFollowButtonTapped(_ sender:UIButton)
+    {
+        if  let user = self.user,
+            let currentUser = PFUser.current()
+        {
+            DispatchQueue.global(qos: .background).async {
+                
+                var error:NSError?
+                
+                let query:PFQuery = PFQuery(className: "User_follow").whereKey("user", equalTo: user).whereKey("follower", equalTo: currentUser)
+                var followerCount:Int = PFQuery(className: "User_follow").whereKey("user", equalTo: user).countObjects(&error)
+                var isFollowing:Bool = query.countObjects(&error) > 0
+                
+                if error != nil
+                {
+                    print("Error: \(error!)")
+                }
+                
+                if isFollowing == true
+                {
+                    do {
+                        
+                        let user_follow:PFObject = try query.getFirstObject()
+                        
+                        try user_follow.delete()
+                        
+                        followerCount -= 1
+                        isFollowing = false
+                    }
+                    catch(let e)
+                    {
+                        print("Exception: \(e)")
+                    }
+                }
+                else
+                {
+                    do {
+                        let user_follow:PFObject = PFObject(className: "User_follow")
+                        user_follow["user"] = user
+                        user_follow["follower"] = currentUser
+                        
+                        try user_follow.save()
+                        
+                        followerCount += 1
+                        isFollowing = true
+                    }
+                    catch(let e)
+                    {
+                        print("Exception: \(e)")
+                    }
+                }
+                DispatchQueue.main.async {
+                    self.userHeaderView?.numberFollowersLabel?.text = "Volgers: \(followerCount)"
+                    
+                    self.userHeaderView?.followButton?.setTitle(isFollowing ? "niet meer volgen" : "volgen", for: UIControl.State.normal)
+                }
+            }
+        }
+    }
+    
+    func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any])
+    {
+        if  let currentUser: PFUser     = PFUser.current(),
+            let image:UIImage           = info[UIImagePickerController.InfoKey.originalImage] as? UIImage,
+            let data:Data               = image.pngData(),
+            let imageFile:PFFileObject  = PFFileObject(data: data)
+        {
+            currentUser.setObject(imageFile, forKey: "avatar")
+            
+            picker.dismiss(animated: true, completion: nil)
+            
+            let hud:MBProgressHUD = MBProgressHUD.showAdded(to: self.view, animated: true)
+            hud.mode = MBProgressHUDMode.indeterminate
+            
+            currentUser.saveInBackground() {
+                (Success, error) in
+                
+                hud.hide(animated: true)
+                
+                self.userHeaderView?.imageView?.image = image
+            }
         }
     }
     
